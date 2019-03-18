@@ -6,14 +6,18 @@ import cgi
 import boto3
 import subprocess
 import threading
-import os
+import os, sys
+sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir))
+print(sys.path)
+
+from util.util import Util
 
 app = Flask(__name__, instance_relative_config=True)
-app.config.from_pyfile('config.py')
+config = Util().get_config()
 
 @app.route('/', methods=['GET'])
 def get_objects():
-    url = app.config['VIDEO_URL']
+    url = config,get('dev', 'VIDEO_URL')
 
     remotefile = urllib.request.urlopen(url)
     blah = remotefile.info()['Content-Disposition']
@@ -27,8 +31,8 @@ def get_objects():
     result = urllib.request.urlretrieve(url, filepath)
     filepath = result[0]
 
-    bucket_name = app.config['BUCKET_NAME']
-    thread = threading.Thread(target=upload_to_s3, args=(bucket_name, filename, list(obj)))
+    bucket_name = config,get('dev','BUCKET_NAME')
+    thread = threading.Thread(target=upload_to_s3, args=(bucket_name, filename, filepath))
     # if obj is not None:
     #     thread.run()
     #     return render_template('object.html', obj=[1,2,2,3])
