@@ -1,4 +1,7 @@
+#!flask/bin/python
+
 import boto3
+import botocore
 import queue
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -10,31 +13,34 @@ import cgi
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir))
 print(sys.path)
 from os.path import dirname, abspath
-
 from timer.repeatedTimer import RepeatedTimer
 from util.util import Util
+import signal
+from util.logger import Logger
+
+logger = Logger().get_logger(__name__)
+
 class SQSWorker:
 
-
-
-    def __init__(self, listenerTimeOut, requestQueueName, responseQueueName, visibilityTimeOut):
+    def __init__(self, listenerTimeOut, requestQueueName, responseQueueName, visibilityTimeOut, numberofRequestFetch):
 
         self.processedReqeuests = queue.Queue()
         self.listenerTimeOut = listenerTimeOut
         self.requestQueueName = requestQueueName
         self.responseQueueName = responseQueueName
         self.visibilityTimeOut = visibilityTimeOut
+        self.numberOfRequestFetched = numberofRequestFetch
         self.messageReceiverTimeout = 10
         self.requestsQueueUrl = None
         self.responseQueueUrl = None
+        self.stopListner = False
         self.__init_queue_url()
-        self.recurrentDeleteMessageJob = RepeatedTimer(60, self.delete_message)
-        self.recurrentDeleteMessageJob.start()
+        self.recurrentDeleteMessageJob = RepeatedTimer(30, self.delete_message)
         self.config = Util().get_config()
-        self.darknetTargets = ['/home/ubuntu/Project/darknet','/home/ubuntu/Project/darknet2','/home/ubuntu/Project/darknet3','/home/ubuntu/Project/darknet4',
-                                '/home/ubuntu/Project/darknet5', '/home/ubuntu/Project/darknet6', '/home/ubuntu/Project/darknet7', '/home/ubuntu/Project/darknet8',
-                                '/home/ubuntu/Project/darknet9'
-                                ]
+        self.darknetTargets = ['/home/ubuntu/distributedSurvellienceSystem/darknet','/home/ubuntu/distributedSurvellienceSystem/darknet2',
+                                '/home/ubuntu/distributedSurvellienceSystem/darknet3'
+                              ]       
+
         
     def __init_queue_url(self):
         sqs = boto3.client('sqs')  
@@ -42,21 +48,21 @@ class SQSWorker:
         response = sqs.get_queue_url(QueueName=self.requestQueueName)
         if 'QueueUrl' in response:
             self.requestsQueueUrl = response['QueueUrl']
-        # response = sqs.get_queue_url(QueueName=self.responseQueueName)
-        # if 'QueueUrl' in response:
-        #     self.responseQueueUrl = response['QueueUrl']
+        response = sqs.get_queue_url(QueueName=self.responseQueueName)
+        if 'QueueUrl' in response:
+            self.responseQueueUrl = response['QueueUrl']
      
     def listener(self):
         sqs = boto3.client('sqs')    
 
         while True:
-            print("Fetching requests from the SQS")
+            logger.info("Fetching requests from the SQS")
             response = sqs.receive_message(
                         QueueUrl=self.requestsQueueUrl,
                         AttributeNames=[
                             'All'
                         ],
-                        MaxNumberOfMessages=10,
+                        MaxNumberOfMessages=self.numberOfRequestFetched,
                         MessageAttributeNames=[
                             'All'
                         ],
@@ -66,21 +72,30 @@ class SQSWorker:
                 
             if 'Messages' in response and len(response['Messages']) > 0:
                 messages = response['Messages']
-                print("Received {0} requests to process".format(len(response['Messages'])))
+                logger.info("Received {0} requests to process".format(len(response['Messages'])))
                 i = 0
-                with ThreadPoolExecutor(max_workers=2) as executor:
+                future = []
+                with ThreadPoolExecutor(max_workers=self.numberOfRequestFetched) as executor:
                      for message in messages:
                         future = executor.submit(self.task, message, time.time(), self.darknetTargets[i])
                         i += 1
+                if self.stopListner:
+                    future.result()
+                    logger.info("Stopping The listner")
+                    break
             else:
-                print("No request receieved")
+                logger.info("No request receieved")
+                if self.stopListner:
+                    logger.info("Stopping The listner")
+                    break
                 time.sleep(10)
                 continue
             time.sleep(self.listenerTimeOut)
 
+    
     def delete_message(self):
 
-        print("Deleting the completed requests {0}".format(self.processedReqeuests.empty()))
+        logger.info("Deleting the completed requests {0}".format(self.processedReqeuests.empty()))
         entries = []
         count = 0
         total_time = 0
@@ -94,7 +109,7 @@ class SQSWorker:
                  total_time += entry[2]
             count += 1
 
-        print("Entries", entries)
+        logger.info("Meesage to be deleted {0}".format(entries))
         if count > 0:
             sqs = boto3.client('sqs')   
             response = sqs.delete_message_batch(
@@ -102,78 +117,96 @@ class SQSWorker:
                 Entries=entries
             )
             avrageResponseTime = float(total_time/count)
-            print("Average Time - {0}".format(avrageResponseTime))
-            print("Deleted the completed requests Successfully")
+            logger.info("Average Time - {0}".format(avrageResponseTime))
+            logger.info("Deleted the completed requests Successfully")
         else:
-            print("No completed requests to delete")
-
-        # if 'Failed' in response and len(response['Failed']) > 0:
-        #     for failed in response['Failed']:
-        #         self.processedReqeuests.put((failed[''], failed['']))
+            logger.info("No completed requests to delete")
         
 
     def task(self, message, receivedTime, targetDir):
 
-        curTime = time.time()
+        
         sqs = boto3.client('sqs')
-        print("Processing request {0}".format(message['MessageId']))
+        logger.info("Processing request {0}".format(message['MessageId']))
         d = dirname(dirname(abspath(__file__)))
         
         url = self.config.get('dev','VIDEO_URL')
 
-        # remotefile = urllib.request.urlopen(url)
-        # blah = remotefile.info()['Content-Disposition']
-        # _, params = cgi.parse_header(blah)
-
-        filename = message['MessageId']                                                                             
-        filepath = os.path.join(d, "data", message['MessageId'])
-        result = urllib.request.urlretrieve(url, filepath)
-        print(filepath)
+        filename = message['MessageAttributes']['Filename']['StringValue']                                                                           
+        filepath = os.path.join(d, "data", filename)
+        self.__download_from_s3(filename, filepath)
         obj = self.__object_detect(filepath, targetDir)
         if obj is not None:
-            bucket_name = self.config.get('dev','BUCKET_NAME')
-            thread = threading.Thread(target=self.__upload_to_s3, args=(bucket_name, filename, list(obj)))
+            bucket_name = self.config.get('dev','RESULT_BUCKET_NAME')
+            objects = ', '.join(str(e) for e in obj)
+            messageBody = " {0} ".format(objects)
+            thread = threading.Thread(target=self.__upload_to_s3, args=(bucket_name, filename, objects))
             thread.start()
+            response = sqs.send_message(
+                        QueueUrl=self.responseQueueUrl,
+                        MessageBody=messageBody,
+                        MessageAttributes={
+                            'correlationId': {
+                                'StringValue': message['MessageId'],
+                                'DataType': 'String'
+                            },
+                            'Filename': {
+                                'StringValue':filename,
+                                'DataType': 'String'
+                            }
+                            
+                        },  
+                        MessageDeduplicationId=message['MessageId'],
+                        MessageGroupId="SurvellienceAppResponseGroup"
+                    ) 
+            curTime = time.time()
             self.processedReqeuests.put((message['ReceiptHandle'],message['MessageId'], curTime - receivedTime))
-            print("number of completed requests {0}".format(self.processedReqeuests.qsize()))    
-         
+            logger.info("number of completed requests {0}".format(self.processedReqeuests.qsize()))    
+
+
+    def __download_from_s3(self, key, path):
+
+        s3 = boto3.resource('s3')
+        bucket_name = self.config.get('dev','BUCKET_NAME')
+        try:
+            s3.Bucket(bucket_name).download_file(key, path)
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == "404":
+                logger.error("The object does not exist.")
+            else:
+                raise
 
     def __upload_to_s3(self,bukcet_name, key, content):
         s3 = boto3.resource("s3")
-        s3.Object(bukcet_name, key).put(Body=str(content))
+        s3.Object(bukcet_name, key).put(Body=content)
+
 
     def __object_detect(self,filepath, targetDir):
         
         weight_path = self.config.get('dev','WEIGHT_PATH')
-        cmd = "./darknet detector demo cfg/coco.data cfg/yolov3-tiny.cfg "+ weight_path + " " + filepath + " -dont_show"
-        print(cmd)
+        cmd = "xvfb-run ./darknet detector demo cfg/coco.data cfg/yolov3-tiny.cfg "+ weight_path + " " + filepath + " -dont_show"
+        logger.info(cmd)
  
         proc = subprocess.Popen([cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, cwd=targetDir)
         out, err = proc.communicate()
         
         exit_code = proc.returncode
         if exit_code:
-            print("Error While detection - ", err)
+            logger.error("Error While detection - ", err)
             return None
-        print("Successfully completed the detection - ", out)
+        logger.info("Successfully completed the detection - ", out)
 
         obj = set()
+        out = out.decode(encoding="utf-8")
         lines = out.split("\n")
         for line in lines:
             if line == '' or line.split(":")[-1] == "":
                 continue
-            if line.split(":")[-1][-2] == "%":
+            if line.split(":")[-1][-1] == "%":
                 obj.add(line.split(":")[0])
-        print("Objects {0}".format(obj))
+        logger.info("Objects {0}".format(obj))
         return obj
 
     # def calculate_visibility_timeout():
 
 
-
-if __name__ == '__main__':
-
-    sqsworker = SQSWorker(60,"test2.fifo", "response.fifo", 240)
-    sqsWorkerThread = threading.Thread(target=sqsworker.listener)
-    sqsWorkerThread.start()
-    sqsWorkerThread.join()

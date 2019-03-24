@@ -1,0 +1,7 @@
+[Unit]
+Description=Survellience App CSE546
+
+[Service]
+Type=forking
+ExecStart=/bin/bash /usr/bin/survellience-app.sh
+User=ubuntu
