@@ -36,7 +36,7 @@ class autoscale:
             self.CpuUtilizeMinMetric = CpuUtilizeMetric(30,10,"ScaleIn")     
             self.config = Util().get_config()
             self.AcceptableScaleOutBacklogMetric = AcceptableBacklogMetric(40, 40, self.config.get('dev','REQUESTS_SQS'), "ScaleOut")
-            self.AcceptableScaleInBacklogMetric = AcceptableBacklogMetric(40, 40, self.config.get('dev','RESPONSE_SQS'), "ScaleIn")
+            self.AcceptableScaleInBacklogMetric = AcceptableBacklogMetric(40, 40, self.config.get('dev','REQUESTS_SQS'), "ScaleIn")
             self.ScaleInMetric = [self.AcceptableScaleInBacklogMetric]
             self.ScaleOutMetric = [self.AcceptableScaleOutBacklogMetric]
 
@@ -90,18 +90,18 @@ class autoscale:
         return None, None
 
     def watch_usage(self):
-
+        timeout = 60
         while True:
             self._lock.acquire() 
             total_instances = len(self.list_instances)
             if total_instances > 0: 
+                timeout = 60
                 scaleInResultQueue = queue.Queue()
                 scaleOutResultQueue = queue.Queue()
                 scaleOutThread = self.calculate(self.ScaleOutMetric, scaleOutResultQueue)   
                 scaleInThread = self.calculate(self.ScaleInMetric, scaleInResultQueue)
                 scaleInResult = self.__combineResult(scaleInThread, scaleInResultQueue)
                 scaleOutResult = self.__combineResult(scaleOutThread, scaleOutResultQueue)
-
 
                 if not self._is_scaling:
                     if True in scaleOutResult :                       
@@ -111,6 +111,7 @@ class autoscale:
                                 self.desired_instances += self.AcceptableScaleOutBacklogMetric.step
                             else:
                                 self.desired_instances = self.max_instances
+                            timeout = 90
                     elif len(set(scaleInResult)) == 1 and True == scaleInResult[0]:
                         if self.desired_instances > self.min_instances:
                             logger.info("Scaling in the system....")
@@ -118,10 +119,10 @@ class autoscale:
                                 self.desired_instances -= self.AcceptableScaleInBacklogMetric.step
                             else:
                                 self.desired_instances = self.min_instances
-                                    
+                            timeout = 90
+                                 
             self._lock.release()
-
-            time.sleep(60)
+            time.sleep(timeout)
 
     def __combineResult(self, threads, queue):
         result = []
@@ -146,30 +147,30 @@ class autoscale:
             if not self._is_scaling:
                 if len(self.list_instances) < self.desired_instances:
                     self._is_scaling = True
-                    logger.info("Desired Instances are more than runnning instances.Starting New Instances ....")
+                    logger.info("Desired Instances are {0} which is more than runnning instances {1}.Starting New Instances ....".format(self.desired_instances, len(self.list_instances)))
                     self.start_instance(self.desired_instances - len(self.list_instances))
                 if len(self.list_instances) > self.desired_instances:
                     self._is_scaling = True
-                    logger.info("Desired Instances are less than runnning instances.Terminating the Instances ....")
+                    logger.info("Desired Instances are {0} which is less than runnning instances{1}.Terminating the Instances ....".format(self.desired_instances, len(self.list_instances)))
                     self.stop_instance(len(self.list_instances)- self.desired_instances)
                     self._is_scaling = False
             self._lock.release()
-            time.sleep(80)
+            time.sleep(20)
 
     def stop_instance(self, step):
         ec2 = boto3.client('ec2')
         logger.info("Using Step - {0}  for stopping instances".format(step))
         instance_ids = []
         i = 0
+        ec2_resource = boto3.resource('ec2')
         for i in range(step):
-            public_ip = self.list_instances[i].public_ip_address
+            instance = ec2_resource.Instance(self.list_instances[i].instance_id)
+            public_ip = instance.public_ip_address
             api = "http://{0}:5000/stop".format(public_ip)
             response = requests.get(api)
             logger.info("Response from stop instance api - {0}".format(response.status_code))
             instance_ids.append(self.list_instances[i].instance_id)
-        
-        time.sleep(self.warmuptime)
-        
+              
         response = ec2.stop_instances(
                 InstanceIds=instance_ids
         )
@@ -177,6 +178,8 @@ class autoscale:
         self.stopped_instances.extend(self.list_instances[:step])
 
         self.list_instances = self.list_instances[step:]
+
+        time.sleep(self.warmuptime)
             
        
 
@@ -186,25 +189,29 @@ class autoscale:
         if len(self.stopped_instances) > 0:
             ec2_client = boto3.client('ec2')
             logger.info("Starting the stopped instances.")
+            to_start_instance_str = [instance.instance_id for instance in self.stopped_instances[:step]]
             to_start_instance = self.stopped_instances[:step]
             self.stopped_instances = self.stopped_instances[step:]
             response = ec2_client.start_instances(
-                InstanceIds=to_start_instance
+                InstanceIds=to_start_instance_str
             )
             if len(response['StartingInstances']) == len(to_start_instance):
                 is_scaled = step==len(to_start_instance)
                 t = threading.Timer(self.warmuptime, self.afterWarmUpPeriod, args=[to_start_instance, is_scaled])
                 t.start()
-                
-            if len(to_start_instance) < step:
-                step = step - len(to_start_instance)
+            step = step - len(to_start_instance)
             
         instances = []
-        if step:
+        if step > 0:
             batch = step
+            tempBatch = step
             while batch  > 0:
                 if batch > 5:
+                    tempBatch = batch - 5
                     batch = 5
+                else:
+                    tempBatch = batch - batch
+
                 response = ec2.create_instances(
                     ImageId=self.config.get('dev','IMAGE_ID'),
                     MaxCount=batch,
@@ -216,10 +223,9 @@ class autoscale:
                     },
                     SecurityGroupIds=[
                         self.security_group_id,
-                    ],
-                    UserData=self.user_data                                                                                    
+                    ]                                                                                   
                 )
-                batch = step - 5
+                batch = tempBatch
                 instances.extend(response)
                 if len(instances) == step:
                     i = len(self.list_instances) + 1
@@ -230,17 +236,20 @@ class autoscale:
                                     'Value': instance_name
                                 }]) 
                             i += 1
-                    t = threading.Timer(self.warmuptime, self.afterWarmUpPeriod, args=[response, True])
+                    t = threading.Timer(self.warmuptime, self.afterWarmUpPeriod, args=[instances, True])
                     t.start() 
 
     def afterWarmUpPeriod(self, newInstances, is_scaled):
+        self._lock.acquire()
+        
         if is_scaled:
             logger.info("System Is scaled")
         else:
             logger.info("Started the stopped Instances. System scaled partially")
-        self._lock.acquire()
+        
         self.list_instances.extend(newInstances)
         self._is_scaling = not is_scaled
+
         self._lock.release()
 
     def healthcheck(self, instances):

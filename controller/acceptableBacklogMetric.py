@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import boto3
 import math
 import os, sys
+import time
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir))
 print(sys.path)
 
@@ -37,21 +38,35 @@ class AcceptableBacklogMetric:
         
         logger.info("Checking Usage")
         sqs = boto3.client('sqs')
-
-        response = sqs.get_queue_attributes(
-                    QueueUrl=self.QueueUrl,
-                    AttributeNames=[
-                           'ApproximateNumberOfMessages'
-                    ]
-        )
+        counter = 1
+        if self.type == "ScaleIn":
+                counter = 4
         
-        attributes = response['Attributes']
-        meesagesInQueue= totalInstances
-        if 'ApproximateNumberOfMessages' in attributes:
-            meesagesInQueue = int(attributes['ApproximateNumberOfMessages'])
+        avgNumberOfMessages = 0
+        temp = counter 
+        while temp > 0:
+            
+            response = sqs.get_queue_attributes(
+                        QueueUrl=self.QueueUrl,
+                        AttributeNames=[
+                            'ApproximateNumberOfMessages',
+                            'ApproximateNumberOfMessagesNotVisible'
+                        ]
+            )
+            
+            attributes = response['Attributes']
+            meesagesInQueue= totalInstances
+            if 'ApproximateNumberOfMessages' in attributes:
+                meesagesInQueue = int(attributes['ApproximateNumberOfMessages'])
+            avgNumberOfMessages += meesagesInQueue
+            if self.type == "ScaleIn":
+                avgNumberOfMessages += int(attributes['ApproximateNumberOfMessagesNotVisible'])
+            temp -= 1
+            time.sleep(2)
 
-        logger.info("Current messages in queue {0} is {1} instances {2}".format( self.type, attributes['ApproximateNumberOfMessages'], totalInstances))
-        backlogPerInstance = float(meesagesInQueue/totalInstances)
+        avgNumberOfMessages = avgNumberOfMessages / counter
+        logger.info("Current messages in queue {0} is {1} instances {2}".format( self.type, avgNumberOfMessages, totalInstances))
+        backlogPerInstance = float(avgNumberOfMessages/totalInstances)
         
         logger.info("Current Backlog per instance for {0} is {1}".format( self.type, backlogPerInstance))
 
