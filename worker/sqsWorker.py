@@ -131,8 +131,8 @@ class SQSWorker:
                      for message in messages:
                         future = executor.submit(self.task, message, time.time(), self.darknetTargets[i])
                         i += 1
+                     future.result()
                 if self.stopListner:
-                    future.result()
                     logger.info("Stopping The listner")
                     break
             else:
@@ -234,7 +234,8 @@ class SQSWorker:
                     ) 
             curTime = time.time()
             self.processedReqeuests.put((message['ReceiptHandle'],message['MessageId'], curTime - receivedTime))
-            logger.info("number of completed requests {0}".format(self.processedReqeuests.qsize()))    
+            logger.info("number of completed requests {0}".format(self.processedReqeuests.qsize())) 
+
 
 
     def __download_from_s3(self, key, path):
