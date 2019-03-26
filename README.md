@@ -1,16 +1,16 @@
 # distributedSurvellienceSystem
 
 install xvfb
-
-
 sudo apt install xvfb
+
 sudo apt install python3-pip
+
 install flask
 pip3 install --user flask
+
 pip3 install --user boto3
 
 copy credentials and config for aws account to ~/.aws
-
 
 create 2 queues one for requests and other for response
 

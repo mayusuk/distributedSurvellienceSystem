@@ -34,6 +34,7 @@ class SQSWorker:
         self.requestsQueueUrl = None
         self.responseQueueUrl = None
         self.stopListner = False
+        self.avrageResponseTime = 40
         self.__init_queue_url()
         self.recurrentDeleteMessageJob = RepeatedTimer(30, self.delete_message)
         self.config = Util().get_config()
@@ -116,15 +117,14 @@ class SQSWorker:
                 QueueUrl=self.requestsQueueUrl,
                 Entries=entries
             )
-            avrageResponseTime = float(total_time/count)
-            logger.info("Average Time - {0}".format(avrageResponseTime))
+            self.avrageResponseTime = float(total_time/count)
+            logger.info("Average Time - {0}".format(self.avrageResponseTime))
             logger.info("Deleted the completed requests Successfully")
         else:
             logger.info("No completed requests to delete")
         
 
     def task(self, message, receivedTime, targetDir):
-
         
         sqs = boto3.client('sqs')
         logger.info("Processing request {0}".format(message['MessageId']))
@@ -192,9 +192,9 @@ class SQSWorker:
         
         exit_code = proc.returncode
         if exit_code:
-            logger.error("Error While detection - ", err)
+            logger.error("Error While detection - {0}".format(err))
             return None
-        logger.info("Successfully completed the detection - ", out)
+        logger.info("Successfully completed the detection - {0}".format(out))
 
         obj = set()
         out = out.decode(encoding="utf-8")

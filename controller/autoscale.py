@@ -26,8 +26,7 @@ class autoscale:
             self.list_instances = []
             self.stopped_instances = []
             self.random = str(random.randint(1, 9999))
-            self.security_group, self.security_group_id = self.create_security_group()
-           
+            self.security_group, self.security_group_id = self.create_security_group()          
             self._is_scaling = False
             self._lock = threading.Lock()
             self.instance_management_thread = threading.Thread(target=self.instance_management)
@@ -119,6 +118,7 @@ class autoscale:
                                 self.desired_instances -= self.AcceptableScaleInBacklogMetric.step
                             else:
                                 self.desired_instances = self.min_instances
+                                    
             self._lock.release()
 
             time.sleep(60)
@@ -165,7 +165,7 @@ class autoscale:
             public_ip = self.list_instances[i].public_ip_address
             api = "http://{0}:5000/stop".format(public_ip)
             response = requests.get(api)
-            print("Response - {0}".format(response.status_code))
+            logger.info("Response from stop instance api - {0}".format(response.status_code))
             instance_ids.append(self.list_instances[i].instance_id)
         
         time.sleep(self.warmuptime)
@@ -199,35 +199,39 @@ class autoscale:
             if len(to_start_instance) < step:
                 step = step - len(to_start_instance)
             
-
+        instances = []
         if step:
-
-            response = ec2.create_instances(
-                ImageId=self.config.get('dev','IMAGE_ID'),
-                MaxCount=step,
-                MinCount=step,
-                InstanceType='t2.micro',
-                KeyName=self.config.get('dev','SSH_KEY'),   
-                Monitoring={
-                    'Enabled': True
-                },
-                SecurityGroupIds=[
-                    self.security_group_id,
-                ],
-                UserData=self.user_data                                                                                    
-            )
-
-            if len(response) == step:
-                i = len(self.list_instances) + 1
-                for instance in response:
-                        instance_name = 'app-instance{0}'.format(i)
-                        instance.create_tags(Tags=[{
-                                'Key': 'name',
-                                'Value': instance_name
-                            }]) 
-                        i += 1
-                t = threading.Timer(self.warmuptime, self.afterWarmUpPeriod, args=[response, True])
-                t.start() 
+            batch = step
+            while batch  > 0:
+                if batch > 5:
+                    batch = 5
+                response = ec2.create_instances(
+                    ImageId=self.config.get('dev','IMAGE_ID'),
+                    MaxCount=batch,
+                    MinCount=batch,
+                    InstanceType='t2.micro',
+                    KeyName=self.config.get('dev','SSH_KEY'),   
+                    Monitoring={
+                        'Enabled': True
+                    },
+                    SecurityGroupIds=[
+                        self.security_group_id,
+                    ],
+                    UserData=self.user_data                                                                                    
+                )
+                batch = step - 5
+                instances.extend(response)
+                if len(instances) == step:
+                    i = len(self.list_instances) + 1
+                    for instance in response:
+                            instance_name = 'app-instance{0}'.format(i)
+                            instance.create_tags(Tags=[{
+                                    'Key': 'name',
+                                    'Value': instance_name
+                                }]) 
+                            i += 1
+                    t = threading.Timer(self.warmuptime, self.afterWarmUpPeriod, args=[response, True])
+                    t.start() 
 
     def afterWarmUpPeriod(self, newInstances, is_scaled):
         if is_scaled:

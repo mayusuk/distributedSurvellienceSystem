@@ -35,7 +35,7 @@ class AcceptableBacklogMetric:
 
     def check_usage(self, instances, totalInstances, queue):
         
-        print("Checking Usage")
+        logger.info("Checking Usage")
         sqs = boto3.client('sqs')
 
         response = sqs.get_queue_attributes(

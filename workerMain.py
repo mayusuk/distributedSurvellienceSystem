@@ -25,6 +25,11 @@ def create_app():
     def get_health():
         result = {'Response': 'Done'}
         return make_response(jsonify(result), 200)
+    
+    @app.route('/averageResponseTime', methods=['GET'])
+    def get_averageResponseTime():
+        result = {'Response': 'Done'}
+        return make_response(jsonify(result), 200)
 
     @app.route('/stop', methods=['GET'])
     def stop_listner():
