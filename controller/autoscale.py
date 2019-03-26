@@ -115,7 +115,7 @@ class autoscale:
                     elif len(set(scaleInResult)) == 1 and True == scaleInResult[0]:
                         if self.desired_instances > self.min_instances:
                             logger.info("Scaling in the system....")
-                            if self.desired_instances - self.AcceptableScaleInBacklogMetric.step <= self.min_instances:
+                            if self.desired_instances - self.AcceptableScaleInBacklogMetric.step >= self.min_instances:
                                 self.desired_instances -= self.AcceptableScaleInBacklogMetric.step
                             else:
                                 self.desired_instances = self.min_instances
