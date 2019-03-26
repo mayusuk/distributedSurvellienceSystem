@@ -16,7 +16,7 @@ def create_app():
         config = Util().get_config()
         request_sqs = config.get('dev','REQUESTS_SQS')
         response_sqs = config.get('dev','RESPONSE_SQS')
-        sqsworker = SQSWorker(60,request_sqs, response_sqs, 240, 1)    
+        sqsworker = SQSWorker(60,request_sqs, response_sqs, 360, 1)    
         thread = threading.Thread(target=sqsworker.listener)
         sqsworker.recurrentDeleteMessageJob.start()
         thread.start()

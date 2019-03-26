@@ -171,8 +171,8 @@ class autoscale:
             logger.info("Response from stop instance api - {0}".format(response.status_code))
             instance_ids.append(self.list_instances[i].instance_id)
 
-        time.sleep(self.warmuptime)
-         
+        time.sleep(180)
+
         response = ec2.stop_instances(
                 InstanceIds=instance_ids
         )
@@ -181,6 +181,7 @@ class autoscale:
 
         self.list_instances = self.list_instances[step:]
 
+        time.sleep(10)
         
             
        
