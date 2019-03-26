@@ -78,7 +78,7 @@ class AcceptableBacklogMetric:
             queue.put(True)
         elif self.type == "ScaleIn" and scaleFactor < 0:
             logger.info("Backlog per instances are less than desired. Step is {0}".format(math.floor(scaleFactor)))
-            self.step = math.floor(scaleFactor)
+            self.step = abs(math.floor(scaleFactor))
             queue.put(True)
         else:
             logger.info("Backlog per instances  are normal")
