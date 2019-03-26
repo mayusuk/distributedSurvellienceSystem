@@ -22,8 +22,8 @@ def create_app():
     app = Flask(__name__, instance_relative_config=True)
     with app.app_context():
         config = Util().get_config()
-        sqsworker = SQSWorker(60,"test2.fifo", "test3.fifo", 240)
-
+        sqsworker = SQSWorker(60,"request.fifo", "response.fifo", 240, 1)
+        _set = set()
         pollerThread = threading.Thread(target=sqsworker.response_poller)
         pollerThread.start()
 
@@ -78,24 +78,33 @@ def create_app():
     def get_default():
         url = config.get('dev', 'VIDEO_URL')
         
-        lock.acquire()
         remotefile = urllib.request.urlopen(url)
         blah = remotefile.info()['Content-Disposition']
         _, params = cgi.parse_header(blah)
         filename = params["filename"]
+        uploadFlag = True
+
+        lock.acquire()
+        if filename in _set:
+            uploadFlag = False
         lock.release()
+
         d = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         filepath = os.path.join(d, "data", filename)
-
-        result = urllib.request.urlretrieve(url, filepath)
-        filepath = result[0]
-
         bucket_name = config.get('dev','BUCKET_NAME')
+
+        lock.acquire()
+        if uploadFlag:
+            result = urllib.request.urlretrieve(url, filepath)
+            filepath = result[0]
+            upload_to_s3(bucket_name, filepath, filename)
+            _set.add(filename)
+        lock.release()
+        
         
         #thread = threading.Thread(target=upload_to_s3, args=(bucket_name, filename, filepath))
         #Upload the video to s3
         print(filepath, filename)
-        upload_to_s3(bucket_name, filepath, filename)
         message_attribute = {
                                 'Filename': {
                                     'DataType': 'String',
@@ -118,7 +127,7 @@ def create_app():
         resp = sqsworker.responseDict[messageId]
         response.response = resp.strip()
         response.status = "Success"
-        
+        #_set.remove(filename)
         return "[" + response.videoId+","+response.response+"]"
         
     @app.route("/getMessageId")
@@ -179,9 +188,13 @@ def create_app():
         return json.dumps(response.__dict__)
 
 
-    def upload_to_s3(bukcet_name, key, content):
-            s3 = boto3.client("s3")
-            s3.upload_file(key,bukcet_name,content)
+    def upload_to_s3(bukcet_name, filepath, filename):
+            
+            s3 = boto3.resource('s3')
+            bucket = s3.Bucket(bukcet_name)
+            bucket.upload_file(filepath, filename)
+            #s3 = boto3.client("s3")
+            #s3.upload_file(key,bukcet_name,content)
 
     def wait_func(messageId):
           while True:
