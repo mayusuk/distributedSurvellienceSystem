@@ -66,11 +66,11 @@ class AcceptableBacklogMetric:
 
         avgNumberOfMessages = avgNumberOfMessages / counter
         logger.info("Current messages in queue {0} is {1} instances {2}".format( self.type, avgNumberOfMessages, totalInstances))
-        backlogPerInstance = float(avgNumberOfMessages/totalInstances)
+        backlogPerInstance = math.ceil(avgNumberOfMessages/totalInstances)
         
         logger.info("Current Backlog per instance for {0} is {1}".format( self.type, backlogPerInstance))
 
-        if self.type == "ScaleOut" and int(backlogPerInstance - self.acceptableBacklog) > 0:
+        if self.type == "ScaleOut" and int(math.ceil(backlogPerInstance - self.acceptableBacklog)) > 0:
             logger.info("Backlog per instances are more than desired. Step is {0}".format(int(backlogPerInstance - self.acceptableBacklog)))
             self.step = int(backlogPerInstance - self.acceptableBacklog)
             queue.put(True)
