@@ -73,11 +73,11 @@ class AcceptableBacklogMetric:
         logger.info("Current Backlog per instance for {0} is {1}".format( self.type, backlogPerInstance))
 
         if self.type == "ScaleOut" and scaleFactor > 0:
-            logger.info("Backlog per instances are more than desired. Step is {0}".format(math.ceil(scaleFactor))
+            logger.info("Backlog per instances are more than desired. Step is {0}".format(math.ceil(scaleFactor)))
             self.step = math.ceil(scaleFactor)
             queue.put(True)
         elif self.type == "ScaleIn" and scaleFactor < 0:
-            logger.info("Backlog per instances are less than desired. Step is {0}".format(math.floor(scaleFactor))
+            logger.info("Backlog per instances are less than desired. Step is {0}".format(math.floor(scaleFactor)))
             self.step = math.floor(scaleFactor)
             queue.put(True)
         else:
