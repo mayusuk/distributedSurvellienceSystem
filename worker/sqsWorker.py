@@ -10,9 +10,11 @@ import sys, os
 import subprocess
 import urllib.request
 import cgi 
+from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir))
 print(sys.path)
 from os.path import dirname, abspath
+from collections import defaultdict
 from timer.repeatedTimer import RepeatedTimer
 from util.util import Util
 import signal
@@ -26,6 +28,7 @@ class SQSWorker:
 
         self.processedReqeuests = queue.Queue()
         self.listenerTimeOut = listenerTimeOut
+        self.responseListenerTimeOut = 5
         self.requestQueueName = requestQueueName
         self.responseQueueName = responseQueueName
         self.visibilityTimeOut = visibilityTimeOut
@@ -41,8 +44,9 @@ class SQSWorker:
         self.darknetTargets = ['/home/ubuntu/distributedSurvellienceSystem/darknet','/home/ubuntu/distributedSurvellienceSystem/darknet2',
                                 '/home/ubuntu/distributedSurvellienceSystem/darknet3'
                               ]       
+        self.responseDict = defaultdict()
 
-        
+
     def __init_queue_url(self):
         sqs = boto3.client('sqs')  
 
@@ -53,6 +57,53 @@ class SQSWorker:
         if 'QueueUrl' in response:
             self.responseQueueUrl = response['QueueUrl']
      
+    def send_message_sqs(self, filename, message_attributes, message_body, groupid):
+        sqs = boto3.client('sqs')
+        response = sqs.send_message(
+                                    QueueUrl=self.requestsQueueUrl,
+                                    DelaySeconds= 0,
+                                    MessageAttributes= message_attributes,
+                                    MessageBody= message_body,                                
+                                    MessageDeduplicationId= str(time.time()),
+                                    MessageGroupId= str(time.time())
+                                )
+        return response['MessageId']
+
+    def response_poller(self):
+        sqs = boto3.client('sqs') 
+        while True:
+            #print("Fetching response from the SQS")
+            response = sqs.receive_message(
+                        QueueUrl=self.responseQueueUrl,
+                        AttributeNames=[
+                            'All'
+                        ],
+                        MaxNumberOfMessages=10,
+                        MessageAttributeNames=[
+                            'All'
+                        ],
+                        VisibilityTimeout=self.visibilityTimeOut,
+                        WaitTimeSeconds=self.messageReceiverTimeout
+                    )
+                
+            if 'Messages' in response and len(response['Messages']) > 0:
+                messages = response['Messages']
+                print("Received {0} requests to process".format(len(response['Messages'])))
+                for message in messages:
+                    print(message)
+                    messageid = message['MessageAttributes']['correlationId']['StringValue']
+                    resp = message['Body']
+                    print(messageid)
+                   
+                    self.responseDict[messageid] = resp
+                    print('Response Dict SQS ', self.responseDict)
+                self.delete_resp_message(messages)
+            else:
+                print("No request receieved")
+                time.sleep(10)
+                continue
+            time.sleep(self.responseListenerTimeOut)
+
     def listener(self):
         sqs = boto3.client('sqs')    
 
@@ -92,6 +143,28 @@ class SQSWorker:
                 time.sleep(10)
                 continue
             time.sleep(self.listenerTimeOut)
+    def delete_resp_message(self, messages):
+
+        print('Deleting response messages')
+        entries = []
+        for message in messages:
+            entries.append({
+                'Id': message['MessageId'],
+                'ReceiptHandle': message['ReceiptHandle']
+            })
+        
+
+        print("Entries", entries)
+        if len(messages) > 0:
+            sqs = boto3.client('sqs')   
+            response = sqs.delete_message_batch(
+                QueueUrl=self.responseQueueUrl,
+                Entries=entries
+            )        
+            print('message deleted from response SQS')    
+        else:
+            print("No completed requests to delete")
+
 
     
     def delete_message(self):
