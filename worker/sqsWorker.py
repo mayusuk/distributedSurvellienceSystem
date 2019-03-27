@@ -140,9 +140,7 @@ class SQSWorker:
                 if self.stopListner:
                     logger.info("Stopping The listner")
                     break
-                time.sleep(10)
-                continue
-            time.sleep(self.listenerTimeOut)
+                time.sleep(5)
     def delete_resp_message(self, messages):
 
         print('Deleting response messages')
