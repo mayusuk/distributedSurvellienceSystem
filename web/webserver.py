@@ -26,54 +26,7 @@ def create_app():
         _set = set()
         pollerThread = threading.Thread(target=sqsworker.response_poller)
         pollerThread.start()
-
-    '''
-    @app.route('/', methods=['GET'])
-    def get_objects():
-        url = config.get('dev', 'VIDEO_URL')
-
-        remotefile = urllib.request.urlopen(url)
-        blah = remotefile.info()['Content-Disposition']
-        _, params = cgi.parse_header(blah)
-
         
-        filename = params["filename"]
-        d = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        filepath = os.path.join(d, "data", filename)
-
-        result = urllib.request.urlretrieve(url, filepath)
-        filepath = result[0]
-
-        bucket_name = config.get('dev','BUCKET_NAME')
-        
-        #thread = threading.Thread(target=upload_to_s3, args=(bucket_name, filename, filepath))
-        #Upload the video to s3
-        print(filepath, filename)
-        upload_to_s3(bucket_name, filepath, filename)
-        message_attribute = {
-                                'Filename': {
-                                    'DataType': 'String',
-                                    'StringValue': filename
-                                }
-                            }
-        message_body = "Filename" + filename
-        print(filename)
-        groupid = "distributedSurvellienceSystem"
-        messageId = sqsworker.send_message_sqs(filename, message_attribute, message_body, groupid)
-        print(messageId)
-        
-        
-        return ""
-
-
-
-        # if obj is not None:
-        #     thread.run()
-        #     return render_template('object.html', obj=[1,2,2,3])
-        # else:
-        #     return render_template('error.html')
-    '''
-
     @app.route("/")
     def get_default():
         url = config.get('dev', 'VIDEO_URL')

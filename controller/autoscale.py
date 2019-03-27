@@ -183,8 +183,6 @@ class autoscale:
 
         time.sleep(10)
         
-            
-       
 
     def start_instance(self,step):
         ec2 = boto3.resource('ec2')
