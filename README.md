@@ -7,7 +7,7 @@ Group Members -
 
 Public IP -
 
-htpp://18.144.16.28:8000/
+http://18.144.16.28:8000/
 
 Bucket name -
 
